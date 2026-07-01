@@ -1,6 +1,4 @@
 #pragma once
-#include "ConcurrentAlloc.h"
-#include "ThreadCache.h"
 #include "comm.h"
 #include <assert.h>
 #include <iostream>
@@ -68,7 +66,7 @@ template <class T> class ObjectPool {
 
         // 头插：直接将obj插入到freelist的头
         *(void **)obj = _freelist;
-        _freelist = *(void **)obj;
+        _freelist = (void *)obj;
     }
 
   private:
@@ -82,11 +80,11 @@ struct TreeNode {
     TreeNode *_right;
     TreeNode() : _val(0), _left(nullptr), _right(nullptr) {}
 };
-void TestObjectPool() {
+inline void TestObjectPool() {
     // 申请释放的轮次
     const size_t Rounds = 3;
     // 每轮申请释放多少次
-    const size_t N = 100000;
+    const size_t N = 1000000;
     size_t begin1 = clock();
     std::vector<TreeNode *> v1;
     v1.reserve(N);
@@ -105,14 +103,15 @@ void TestObjectPool() {
     size_t begin2 = clock();
     std::vector<TreeNode *> v2;
     v2.reserve(N);
+    ObjectPool<TreeNode> pool;
     for (size_t j = 0; j < Rounds; ++j) {
-        cout << "j: " << j << endl;
+        // cout << "j: " << j << endl;
         for (int i = 0; i < N; ++i) {
-            v2.push_back((TreeNode *)ConcurrentAlloc(sizeof(TreeNode)));
+            v2.push_back(pool.New());
         }
         for (int i = 0; i < N; ++i) {
-            cout << "i: " << i << endl;
-            ConcurrentFree(v2[i], sizeof(TreeNode));
+            // cout << "i: " << i << endl;
+            pool.Delete(v2[i]);
         }
         v2.clear();
     }

@@ -1,5 +1,6 @@
 #pragma once
 #include "comm.h"
+#include "PageCache.h"
 
 class CentralCache {
   public:
@@ -16,6 +17,20 @@ class CentralCache {
 
     // 释放对应的Span
     void ReleaseSpan(Span *span);
+
+    void debugPrint() {
+        for (int i = 0; i < N_FREELIST; i++) {
+            if (!_spanLists[i].Empty()) {
+                Span *ptr = _spanLists[i].Begin();
+                cout << "spanList[" << i + 1 << "]: " << endl;
+                while (ptr != _spanLists[i].End()) {
+                    cout << " page_id[" << ptr->_page_id << "] ->UseCount: " << ptr->_useCount << endl;
+                    ptr = ptr->_next;
+                }
+                cout << endl;
+            }
+        }
+    }
 
   private:
     SpanList _spanLists[N_FREELIST]; // 哈希桶

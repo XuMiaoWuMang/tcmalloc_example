@@ -1,9 +1,12 @@
 #pragma once
+#include "ObjectPool.h"
 #include "comm.h"
 class PageCache {
   public:
     // 获取PageCache的单例对象
     static PageCache *GetInstance() { return &_Instance; }
+    // 获取span的大小
+    size_t GetSpanSize(void *ptr) { return MapSpan(ptr)->_objSize; }
 
     Span *NewSpan(size_t batchNum);
     void Lock() { _mutex.lock(); }
@@ -15,11 +18,27 @@ class PageCache {
     // 释放Span
     void ReleaseSpanToPageCache(Span *span);
 
+    void debugPrint() {
+        for (int i = 1; i < N_PAGE_CACHE; i++) {
+            if (!_spanLists[i].Empty()) {
+                Span *ptr = _spanLists[i].Begin();
+                cout << "spanList[" << i << "]: " << endl;
+                while (ptr != _spanLists[i].End()) {
+                    cout << " page_id: " << ptr->_page_id << "->";
+                    ptr = ptr->_next;
+                }
+                cout << endl;
+            }
+        }
+    }
+
   private:
     // 是管理span的数组，索引代表的是对象大小的索引，默认是513。
     SpanList _spanLists[N_PAGE_CACHE];
     // 用于快速查找span, key是page_id, value是span
     std::unordered_map<PAGE_ID, Span *> _spanMap;
+    // 用于管理span的定长内存池
+    ObjectPool<Span> _spanPool;
 
     // 不能是桶锁，因为需要进行不同页数的span的合并与拆分
     std::mutex _mutex;

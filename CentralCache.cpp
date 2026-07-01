@@ -1,5 +1,5 @@
-#include "CentrolCache.h"
-#include "PageCache.h"
+#include "CentralCache.h"
+
 CentralCache CentralCache::_Instance;
 
 Span *CentralCache::GetOneSpan(SpanList &spanList, size_t size) {
@@ -22,6 +22,7 @@ Span *CentralCache::GetOneSpan(SpanList &spanList, size_t size) {
         PageCache::GetInstance()->NewSpan(SizeClass::NumMovePage(size));
     // cout << "NewSpan end..." << endl;
     span->_isUsed = true;
+    span->_objSize = size;
 
     PageCache::GetInstance()->Unlock();
 
@@ -86,12 +87,15 @@ size_t CentralCache::FetchRangeObj(void *&start, void *&end, size_t batchNum,
 void CentralCache::ReleaseRangeObj(void *start, size_t size) {
     assert(start);
     assert(size);
+    // cout << "ReleaseRangeObj begin..." << endl;
     size_t index = SizeClass::Index(size);
     _spanLists[index]._mutex.lock();
 
+    // std::vector<Span *> spansToRelease;
+
     while (start) {
         void *next = nextObj(start);
-
+        // cout<< "ReleaseRangeObj start: " << start << " next: " << next << endl;
         // 找到obj对应的Span对象
         Span *span = PageCache::GetInstance()->MapSpan(start);
 
@@ -106,20 +110,22 @@ void CentralCache::ReleaseRangeObj(void *start, size_t size) {
             span->_freelist = nullptr;
             span->_prev = nullptr;
             span->_isUsed = false;
-
-            // 先解桶锁
-            // 因为此时需要将span给PageCache，对于CentralCache来说，这个span已经不存在了，接下来是PageCache进行操作，所以可以解锁
-            _spanLists[index]._mutex.unlock();
-
-            PageCache::GetInstance()->Lock();
             PageCache::GetInstance()->ReleaseSpanToPageCache(span);
-            PageCache::GetInstance()->Unlock();
 
-            // 再加桶锁
-            _spanLists[index]._mutex.lock();
+            // spansToRelease.push_back(span);
         }
 
         start = next;
     }
-    _spanLists[SizeClass::Index(size)]._mutex.unlock();
+    _spanLists[index]._mutex.unlock();
+
+    // if (!spansToRelease.empty()) {
+    //     PageCache::GetInstance()->Lock();
+    //     for (auto span : spansToRelease) {
+    //         PageCache::GetInstance()->ReleaseSpanToPageCache(span);
+    //     }
+    //     PageCache::GetInstance()->Unlock();
+    // }
+
+    // cout << "ReleaseRangeObj end..." << endl;
 }

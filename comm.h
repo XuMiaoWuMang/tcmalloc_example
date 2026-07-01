@@ -20,10 +20,10 @@ typedef unsigned long long PAGE_ID;
 typedef size_t PAGE_ID;
 #endif
 
-static const size_t MAX_THREAD_CACHE_SIZE = 128 * 1024; // 线程缓存最大大小
+static const size_t MAX_THREAD_CACHE_SIZE = 256 * 1024; // 线程缓存最大大小
 static const size_t N_FREELIST = 208;                   // 线程缓存桶数量
-static const size_t N_PAGE_CACHE = 513;                 // 页面缓存桶数量
-static const size_t PAGE_SHIFT = 12; // 页号左移12位，得到页偏移
+static const size_t N_PAGE_CACHE = 257;                 // 页面缓存桶数量
+static const size_t PAGE_SHIFT = 12;                    // 页的大小移位，例如1页=4MB，则PAGE_SHIFT=12
 
 // 获取下一个对象的地址（实际是读取前八个字节的内容）
 // // 若为32位机器，则读取前四个字节的内容。
@@ -31,10 +31,10 @@ static void *&nextObj(void *obj) { return *(void **)obj; }
 inline static void *SystemAlloc(size_t kpage) {
     // 申请4kB内存页
 #if defined(__WIN32) || defined(_WIN64)
-    void *ptr = VirtualAlloc(0, kpage * (1 << 12), MEM_COMMIT | MEM_RESERVE,
+    void *ptr = VirtualAlloc(0, kpage << PAGE_SHIFT, MEM_COMMIT | MEM_RESERVE,
                              PAGE_READWRITE);
 #elif defined(__x86_64__) || defined(__i386__)
-    void *ptr = mmap(0, kpage * (1 << 12), PROT_READ | PROT_WRITE,
+    void *ptr = mmap(0, kpage << PAGE_SHIFT, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 #endif
     if (ptr == nullptr)
@@ -44,9 +44,9 @@ inline static void *SystemAlloc(size_t kpage) {
 inline static void SystemFree(void *ptr, size_t kpage) {
     // 释放 kpage*4kB 内存页
 #if defined(__WIN32) || defined(_WIN64)
-    VirtualFree(ptr, kpage * (1 << 12), MEM_RELEASE);
+    VirtualFree(ptr, kpage << PAGE_SHIFT, MEM_RELEASE);
 #elif defined(__x86_64__) || defined(__i386__)
-    munmap(ptr, kpage * (1 << 12));
+    munmap(ptr, kpage << PAGE_SHIFT);
 #endif
 }
 class FreeList {
@@ -107,7 +107,7 @@ class FreeList {
 
   private:
     size_t _size = 0;
-    size_t _maxSize = 1;
+    size_t _maxSize = 256;
     void *_head = nullptr;
 };
 
@@ -138,8 +138,7 @@ class SizeClass {
         } else if (size <= 256 * 1024) {
             return _RoundUp(size, 8 * 1024);
         } else {
-            assert(false);
-            return 0;
+            return _RoundUp(size, 1 << PAGE_SHIFT);
         }
     }
 
@@ -173,15 +172,15 @@ class SizeClass {
         assert(size);
         size_t num = MAX_THREAD_CACHE_SIZE / size;
 
-        if (num < 2) {
-            num = 2;
+        if (num < 1) {
+            num = 1;
         } else if (num > 512) {
             num = 512;
         }
         return num;
     }
 
-    // 返回合适的申请的页数
+    // 返回合适的申请的页数(是给Thread Cache用于计算慢启动的申请页数)
     static size_t NumMovePage(size_t size) {
         // 计算批量大小
         size_t batchSize = NumMoveSize(size);
@@ -205,6 +204,8 @@ class Span {
     Span *_prev = nullptr;
 
     size_t _useCount = 0;      // 被ThreadCache使用的块数
+    size_t _objSize = 0;        // 对象大小
+
     void *_freelist = nullptr; // 切好的小块内存的自由链表
 
     bool _isUsed = false; // 正在被使用
