@@ -59,7 +59,9 @@ size_t CentralCache::FetchRangeObj(void *&start, void *&end, size_t batchNum,
     assert(batchNum);
     assert(size);
     // cout << "FetchRangeObj begin..." << endl;
+
     size_t index = SizeClass::Index(size);
+    assert(index < 208);
     _spanLists[index]._mutex.lock();
 
     Span *span = GetOneSpan(_spanLists[index], size);
@@ -95,8 +97,8 @@ void CentralCache::ReleaseRangeObj(void *start, size_t size) {
 
     while (start) {
         void *next = nextObj(start);
-        // cout<< "ReleaseRangeObj start: " << start << " next: " << next << endl;
-        // 找到obj对应的Span对象
+        // cout<< "ReleaseRangeObj start: " << start << " next: " << next <<
+        // endl; 找到obj对应的Span对象
         Span *span = PageCache::GetInstance()->MapSpan(start);
 
         nextObj(start) = span->_freelist;
@@ -106,12 +108,10 @@ void CentralCache::ReleaseRangeObj(void *start, size_t size) {
         if (span->_useCount == 0) {
             // 归还Span
             _spanLists[index].Erase(span);
-            span->_next = nullptr;
-            span->_freelist = nullptr;
-            span->_prev = nullptr;
-            span->_isUsed = false;
-            PageCache::GetInstance()->ReleaseSpanToPageCache(span);
 
+            PageCache::GetInstance()->Lock();
+            PageCache::GetInstance()->ReleaseSpanToPageCache(span);
+            PageCache::GetInstance()->Unlock();
             // spansToRelease.push_back(span);
         }
 

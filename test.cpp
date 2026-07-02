@@ -1,6 +1,10 @@
 #include "ConcurrentAlloc.h"
 #include "ObjectPool.h"
+#include "comm.h"
+#include <atomic>
+#include <thread>
 #include <unistd.h>
+
 // static int num = 0;
 void Alloc1() {
     // 申请释放的轮次
@@ -113,6 +117,101 @@ void testAlloc() {
 
     cout << "Concurrent cost time:" << end2 - begin2 << endl;
 }
+void BenchmarkMalloc(size_t ntimes, size_t nworks, size_t rounds) {
+    std::vector<std::thread> vthread(nworks);
+    std::atomic<size_t> malloc_costtime = 0;
+    std::atomic<size_t> free_costtime = 0;
+    for (size_t k = 0; k < nworks; ++k) {
+        vthread[k] = std::thread([&, k] {
+            std::vector<void *> v;
+            v.reserve(ntimes);
+            for (size_t j = 0; j < rounds; ++j) {
+                size_t begin1 = clock();
+                for (size_t i = 0; i < ntimes; i++) {
+                    // v.push_back(malloc(16));
+                    v.push_back(malloc((8 + i) % 8192 + 1));
+                }
+                size_t end1 = clock();
+                size_t begin2 = clock();
+                for (size_t i = 0; i < ntimes; i++) {
+                    free(v[i]);
+                }
+                size_t end2 = clock();
+                v.clear();
+                malloc_costtime += (end1 - begin1);
+                free_costtime += (end2 - begin2);
+            }
+        });
+    }
+    for (auto &t : vthread) {
+        t.join();
+    }
+    printf("%zu个线程并发执⾏%zu轮次，每轮次malloc %zu次: 花费：%zu ms\n",
+           nworks, rounds, ntimes,
+           malloc_costtime.load() * 1000 / CLOCKS_PER_SEC);
+    printf("%zu个线程并发执⾏%zu轮次，每轮次free %zu次: 花费：%zu ms\n", nworks,
+           rounds, ntimes, free_costtime.load() * 1000 / CLOCKS_PER_SEC);
+    printf("%zu个线程并发malloc&free %zu次，总计花费：%zu ms\n", nworks,
+           nworks * rounds * ntimes,
+           (malloc_costtime.load() + free_costtime.load()) * 1000 /
+               CLOCKS_PER_SEC);
+}
+// 单轮次申请释放次数 线程数 轮次
+void BenchmarkConcurrentMalloc(size_t ntimes, size_t nworks, size_t rounds) {
+    std::vector<std::thread> vthread(nworks);
+    std::atomic<size_t> malloc_costtime = 0;
+    std::atomic<size_t> free_costtime = 0;
+    for (size_t k = 0; k < nworks; ++k) {
+        vthread[k] = std::thread([&] {
+            std::vector<void *> v;
+            v.reserve(ntimes);
+            for (size_t j = 0; j < rounds; ++j) {
+                size_t begin1 = clock();
+                for (size_t i = 0; i < ntimes; i++) {
+                    // v.push_back(ConcurrentAlloc(16));
+                    v.push_back(ConcurrentAlloc((8 + i) % 8192 + 1));
+                }
+                size_t end1 = clock();
+                size_t begin2 = clock();
+                for (size_t i = 0; i < ntimes; i++) {
+                    ConcurrentFree(v[i]);
+                }
+                size_t end2 = clock();
+                v.clear();
+
+                malloc_costtime += (end1 - begin1);
+                free_costtime += (end2 - begin2);
+            }
+        });
+    }
+    for (auto &t : vthread) {
+        t.join();
+    }
+    printf("%zu个线程并发执⾏%zu轮次，每轮次concurrent alloc %zu次: 花费：%zu "
+           "ms\n",
+           nworks, rounds, ntimes,
+           malloc_costtime.load() * 1000 / CLOCKS_PER_SEC);
+    printf("%zu个线程并发执⾏%zu轮次，每轮次concurrent dealloc %zu次: "
+           "花费：%zu ms\n",
+           nworks, rounds, ntimes,
+           free_costtime.load() * 1000 / CLOCKS_PER_SEC);
+    printf("%zu个线程并发concurrent alloc&dealloc %zu次，总计花费：%zu ms\n",
+           nworks, nworks * rounds * ntimes,
+           (malloc_costtime.load() + free_costtime.load()) * 1000 /
+               CLOCKS_PER_SEC);
+}
+int Benchmarktest() {
+
+    size_t n = 10000;
+    cout << "=========================================================="
+         << endl;
+    BenchmarkConcurrentMalloc(n, 10, 10);
+    cout << endl << endl;
+    BenchmarkMalloc(n, 10, 10);
+    cout << "=========================================================="
+         << endl;
+    return 0;
+}
 void test() {
     void *p1 = ConcurrentAlloc(128 * 1024);
     void *p2 = ConcurrentAlloc(127 * 1024);
@@ -130,11 +229,12 @@ void test() {
 
     // PageCache::GetInstance()->debugPrint();
 }
+
 int main() {
-    TLStest();
+    // TLStest();
     // testAlloc();
     // TestObjectPool();
     // test();
-
+    Benchmarktest();
     return 0;
 }

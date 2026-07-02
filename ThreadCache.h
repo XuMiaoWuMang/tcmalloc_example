@@ -16,11 +16,4 @@ class ThreadCache {
   private:
     FreeList _freeList[N_FREELIST]; // 哈希桶管理内存块
 };
-
-// 通过TLS实现线程缓存，不同线程无法访问对方的缓存。
-// 最关键的是不需要锁也能并发获取ThreadCache对象。
-#if defined(__WIN32) || defined(_WIN64)
-static __declspec(thread) ThreadCache *TLS_pthread_cache = nullptr;
-#elif defined(__x86_64__) || defined(__i386__)
-static __thread ThreadCache *TLS_pthread_cache = nullptr;
-#endif
+extern thread_local ThreadCache *TLS_pthread_cache;

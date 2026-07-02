@@ -3,7 +3,6 @@
 #include <iostream>
 #include <mutex>
 #include <sys/mman.h>
-#include <thread>
 #include <time.h>
 #include <unordered_map>
 #include <vector>
@@ -20,10 +19,11 @@ typedef unsigned long long PAGE_ID;
 typedef size_t PAGE_ID;
 #endif
 
-static const size_t MAX_THREAD_CACHE_SIZE = 256 * 1024; // 线程缓存最大大小
-static const size_t N_FREELIST = 208;                   // 线程缓存桶数量
-static const size_t N_PAGE_CACHE = 257;                 // 页面缓存桶数量
-static const size_t PAGE_SHIFT = 12;                    // 页的大小移位，例如1页=4MB，则PAGE_SHIFT=12
+static const size_t MAX_THREAD_CACHE_SIZE = 64 * 4 * 1024; // 线程缓存最大大小
+static const size_t N_FREELIST = 208;                      // 线程缓存桶数量
+static const size_t N_PAGE_CACHE = 257;                    // 页面缓存桶数量
+static const size_t PAGE_SHIFT =
+    12; // 页的大小移位，例如1页=4MB，则PAGE_SHIFT=12
 
 // 获取下一个对象的地址（实际是读取前八个字节的内容）
 // // 若为32位机器，则读取前四个字节的内容。
@@ -41,8 +41,8 @@ inline static void *SystemAlloc(size_t kpage) {
         throw std::bad_alloc();
     return ptr;
 }
+// 释放 kpage*4kB 内存页
 inline static void SystemFree(void *ptr, size_t kpage) {
-    // 释放 kpage*4kB 内存页
 #if defined(__WIN32) || defined(_WIN64)
     VirtualFree(ptr, kpage << PAGE_SHIFT, MEM_RELEASE);
 #elif defined(__x86_64__) || defined(__i386__)
@@ -51,18 +51,21 @@ inline static void SystemFree(void *ptr, size_t kpage) {
 }
 class FreeList {
   public:
+    FreeList() : _head(nullptr), _size(0), _maxSize(256) {};
+
     // 头插：将对象插入到freelist的头
     void Push(void *obj) {
         assert(obj);
+        // if((PAGE_ID)nextObj(obj) < (PAGE_ID)(1 << PAGE_SHIFT))
+        // {
+        //     int a = 0;
+        // }
 
         nextObj(obj) = _head;
         _head = obj;
         _size++;
     }
-    // void PushBack(void *obj) {
-    //     assert(obj);
-    //
-    // }
+
     void PushRange(void *start, void *end, size_t num) {
         assert(start);
         assert(end);
@@ -148,6 +151,7 @@ class SizeClass {
     }
     // 返回桶的下标
     static inline size_t Index(size_t size) {
+        assert(size);
         int index_arr[] = {16, 56, 56, 56};
         if (size <= 128) {
             return _Index(size, 3);
@@ -167,13 +171,13 @@ class SizeClass {
         }
     }
     // 返回合适的批量大小
-    // 例如：size = 128, 则返回 128
+    // 例如：size = 256KB, 则返回 2
     static size_t NumMoveSize(size_t size) {
         assert(size);
         size_t num = MAX_THREAD_CACHE_SIZE / size;
 
-        if (num < 1) {
-            num = 1;
+        if (num < 2) {
+            num = 2;
         } else if (num > 512) {
             num = 512;
         }
@@ -203,8 +207,8 @@ class Span {
     Span *_next = nullptr; // 双向链表结构
     Span *_prev = nullptr;
 
-    size_t _useCount = 0;      // 被ThreadCache使用的块数
-    size_t _objSize = 0;        // 对象大小
+    size_t _useCount = 0; // 被ThreadCache使用的块数
+    size_t _objSize = 0;  // 对象大小
 
     void *_freelist = nullptr; // 切好的小块内存的自由链表
 

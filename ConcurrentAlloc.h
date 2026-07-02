@@ -2,10 +2,13 @@
 
 #include "ThreadCache.h"
 #include "comm.h"
+static ObjectPool<ThreadCache> tls_pool;
+
 // 并发分配内存块
 static void *ConcurrentAlloc(size_t size) {
     // 若分配大小大于ThreadCache大小，则直接从PageCache分配内存块
     if (size > MAX_THREAD_CACHE_SIZE) {
+        // 如果此时申请257KB
         size_t alignsize = SizeClass::RoundUp(size);
         size_t nPage = alignsize >> PAGE_SHIFT;
 
@@ -21,7 +24,6 @@ static void *ConcurrentAlloc(size_t size) {
     }
     // 若ThreadCache结构体指针为空，则创建一个线程缓存
     if (TLS_pthread_cache == nullptr) {
-        static ObjectPool<ThreadCache> tls_pool;
         TLS_pthread_cache = tls_pool.New();
     }
 
@@ -42,6 +44,10 @@ static void ConcurrentFree(void *ptr) {
         PageCache::GetInstance()->ReleaseSpanToPageCache(span);
         PageCache::GetInstance()->Unlock();
     } else {
+        // 若ThreadCache结构体指针为空，则创建一个线程缓存
+        if (TLS_pthread_cache == nullptr) {
+            TLS_pthread_cache = tls_pool.New();
+        }
         assert(size <= MAX_THREAD_CACHE_SIZE);
         TLS_pthread_cache->Deallocate(ptr, size);
     }

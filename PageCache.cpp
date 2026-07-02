@@ -7,7 +7,7 @@ Span *PageCache::NewSpan(size_t NumPage) {
     // cout << "NewSpan begin..." << endl;
 
     // 如果申请页数过大，直接向系统申请空间
-    if (NumPage > N_PAGE_CACHE - 1) {
+    if (NumPage > 64) {
         void *ptr = SystemAlloc(NumPage);
         Span *span = _spanPool.New();
         span->_n = NumPage;
@@ -82,8 +82,9 @@ Span *PageCache::NewSpan(size_t NumPage) {
 }
 
 Span *PageCache::MapSpan(void *obj) {
-    std::unique_lock<std::mutex> lock(_mutex);
     PAGE_ID page_id = ((PAGE_ID)obj >> PAGE_SHIFT);
+
+    std::unique_lock<std::mutex> lock(_mutex);
     auto it = _spanMap.find(page_id);
     if (it == _spanMap.end()) {
 
@@ -106,6 +107,8 @@ void PageCache::ReleaseSpanToPageCache(Span *span) {
     for (int i = 1; i < span->_n - 1; i++) {
         _spanMap.erase(span->_page_id + i);
     }
+    span->_isUsed = false;
+
     PAGE_ID next_page_id = 0;
     Span *nextSpan = nullptr;
     while (1) {
