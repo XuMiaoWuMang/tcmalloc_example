@@ -17,7 +17,7 @@ Span *PageCache::NewSpan(size_t NumPage) {
         // for (PAGE_ID i = 0; i < span->_n; i++) {
         //     _spanMap[span->_page_id + i] = span;
         // }
-        _spanMap[span->_page_id] = span;
+        _spanMap.set(span->_page_id, span);
         return span;
     }
 
@@ -31,7 +31,7 @@ Span *PageCache::NewSpan(size_t NumPage) {
         //     _spanMap[span->_page_id + span->_n - 1] = span;
         // }
         for (PAGE_ID i = 0; i < span->_n; i++) {
-            _spanMap[span->_page_id + i] = span;
+            _spanMap.set(span->_page_id + i, span);
         }
 
         return span;
@@ -54,16 +54,17 @@ Span *PageCache::NewSpan(size_t NumPage) {
             span->_page_id += NumPage;
 
             _spanLists[span->_n].PushFront(span);
-            // 存储span的首位页的地址，方便PageCache回收时合并
 
-            _spanMap[span->_page_id] = span;
+            // 存储span的首位页的地址，方便PageCache回收时合并
+            _spanMap.set(span->_page_id, span);
+
             if (span->_n > 1) {
-                _spanMap[span->_page_id + span->_n - 1] = span;
+                _spanMap.set(span->_page_id + span->_n - 1, span);
             }
 
             // 更新spanMap，方便CentralCache后续查找
             for (PAGE_ID j = 0; j < newSpan->_n; j++) {
-                _spanMap[newSpan->_page_id + j] = newSpan;
+                _spanMap.set(newSpan->_page_id + j, newSpan);
             }
             return newSpan;
         }
@@ -84,14 +85,12 @@ Span *PageCache::NewSpan(size_t NumPage) {
 Span *PageCache::MapSpan(void *obj) {
     PAGE_ID page_id = ((PAGE_ID)obj >> PAGE_SHIFT);
 
-    std::unique_lock<std::mutex> lock(_mutex);
-    auto it = _spanMap.find(page_id);
-    if (it == _spanMap.end()) {
-
+    auto it = _spanMap.get(page_id);
+    if (it == nullptr) {
         assert(false);
         return nullptr;
     }
-    return it->second;
+    return (Span *)it;
 }
 void PageCache::ReleaseSpanToPageCache(Span *span) {
     // cout << "ReleaseSpanToPageCache begin..." << endl;
@@ -100,12 +99,14 @@ void PageCache::ReleaseSpanToPageCache(Span *span) {
     if (span->_n > N_PAGE_CACHE - 1) {
         // 如果释放的页数大于N_PAGE_CACHE - 1，则直接释放给系统
         SystemFree((void *)(span->_page_id << PAGE_SHIFT), span->_n);
-        _spanMap.erase(span->_page_id);
+        _spanMap.set(span->_page_id, nullptr);
         _spanPool.Delete(span);
         return;
     }
-    for (int i = 1; i < span->_n - 1; i++) {
-        _spanMap.erase(span->_page_id + i);
+    if (span->_n > 3) {
+        for (int i = 1; i < span->_n - 1; i++) {
+            _spanMap.set(span->_page_id + i, nullptr);
+        }
     }
     span->_isUsed = false;
 
@@ -114,32 +115,26 @@ void PageCache::ReleaseSpanToPageCache(Span *span) {
     while (1) {
         // 后向合并，如果有空闲的页号，next_page_id合并到当前页中
         next_page_id = span->_page_id + span->_n;
-        if (_spanMap.find(next_page_id) == _spanMap.end()) {
+        auto tmp = (Span *)_spanMap.get(next_page_id);
+        if (tmp == nullptr) {
             break;
         }
-        if (_spanMap[next_page_id]->_isUsed) {
+        nextSpan = tmp;
+        if (nextSpan->_isUsed) {
             break;
         }
-        if (_spanMap[next_page_id]->_n + span->_n >= N_PAGE_CACHE) {
+        if (nextSpan->_n + span->_n >= N_PAGE_CACHE) {
             break;
         }
-        nextSpan = _spanMap[next_page_id];
         // 合并next_page_id
         // 从spanList中删除next_page_id
         _spanLists[nextSpan->_n].Erase(nextSpan);
         nextSpan->_prev = nullptr;
         nextSpan->_next = nullptr;
 
-        // 更新_spanMap里next_page_id的尾部地址为当前首页的地址
-        _spanMap[nextSpan->_page_id + nextSpan->_n - 1] = span;
-
-        if (nextSpan->_n > 1) {
-            // 删除_spanMap里next_page_id的首部页的映射
-            _spanMap.erase(nextSpan->_page_id);
-        }
-        if (span->_n > 1) {
-            // 删除_spanMap里span->_page_id的尾部页的映射
-            _spanMap.erase(span->_page_id + span->_n - 1);
+        // 清除 nextSpan 在基数树中的所有页映射（nextSpan 即将被删除）
+        for (PAGE_ID i = 0; i < nextSpan->_n; i++) {
+            _spanMap.set(nextSpan->_page_id + i, nullptr);
         }
 
         span->_n += nextSpan->_n; // 增加当前页的页数
@@ -152,50 +147,45 @@ void PageCache::ReleaseSpanToPageCache(Span *span) {
     PAGE_ID prev_page_id = 0;
     Span *prevSpan = nullptr;
     while (1) {
-        // 不该只是当前span的页号减1,因为如果执行过一次前向合并，当前span的页号-1并不是新的前项。
-        // 所有需要修改span->_page_id的值，才能正确合并前向的span
-
         prev_page_id = span->_page_id - 1;
-        // 前向合并，如果有空闲的页号，合并到prev_page_id中
-        if (_spanMap.find(prev_page_id) == _spanMap.end()) {
+        auto tmp = (Span *)_spanMap.get(prev_page_id);
+        if (tmp == nullptr) {
             break;
         }
-        if (_spanMap[prev_page_id]->_isUsed) {
+        prevSpan = tmp;
+        if (prevSpan->_isUsed) {
             break;
         }
-        if (_spanMap[prev_page_id]->_n + span->_n >= N_PAGE_CACHE) {
+        if (prevSpan->_n + span->_n >= N_PAGE_CACHE) {
             break;
         }
         // 合并prev_page_id
 
-        prevSpan = _spanMap[prev_page_id];
         // 先把prevSpan从spanList中删除，再合并span
         _spanLists[prevSpan->_n].Erase(prevSpan);
         prevSpan->_prev = nullptr;
         prevSpan->_next = nullptr;
 
-        if (span->_n > 1) {
-            _spanMap.erase(span->_page_id);
-        } // 删除_spanMap里span->_page_id的首部页的映射
+        // 清除 prevSpan 在基数树中的所有页映射（prevSpan 即将被删除）
+        for (PAGE_ID i = 0; i < prevSpan->_n; i++) {
+            _spanMap.set(prevSpan->_page_id + i, nullptr);
+        }
 
-        if (prevSpan->_n > 1) {
-            _spanMap.erase(prev_page_id);
-        } // 删除_spanMap里prev_page_id的尾部页的映射
-
-        // 修改当前span的页号为prev_page_id的页号
+        // 修改当前span的页号为prevSpan的首頁
         span->_page_id = prevSpan->_page_id;
-        // 修改当前span的页数为prev_page_id的页数
+        // 增加当前span的页数
         span->_n += prevSpan->_n;
-        // 修改合并后的span的尾部页的映射
-        _spanMap[span->_page_id] = span;
-        // 修改合并后的span的首部页的映射
-        _spanMap[span->_page_id] = span;
 
         _spanPool.Delete(prevSpan);
     }
     // 此时前向合并完毕
 
-    // 添加合并的Span到spanList
+    // 添加合并后的 span 到 spanList
     _spanLists[span->_n].PushFront(span);
+    // 空闲 span 只需首尾页映射，用于后续合并查找
+    _spanMap.set(span->_page_id, span);
+    if (span->_n > 1) {
+        _spanMap.set(span->_page_id + span->_n - 1, span);
+    }
     // cout << "ReleaseSpanToPageCache end..." << endl;
 }

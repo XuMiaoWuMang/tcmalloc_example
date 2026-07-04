@@ -41,11 +41,11 @@ Span *CentralCache::GetOneSpan(SpanList &spanList, size_t size) {
     span->_freelist = start;
 
     char *next = nullptr;
-    for (next = start + size; next < end; start = next, next += size) {
+    for (next = start; next < end - size; next += size) {
         // printf("start: 0x%x, next: 0x%x\n", start, next);
-        nextObj(start) = next;
+        nextObj(next) = next + size;
     }
-    nextObj(start) = nullptr; // 最后一个有效位置 null terminate
+    nextObj(next) = nullptr; // 最后一个有效位置 null terminate
 
     // 在此处 CentralCache 加桶锁
     spanList._mutex.lock();
@@ -74,6 +74,7 @@ size_t CentralCache::FetchRangeObj(void *&start, void *&end, size_t batchNum,
     // 无论够不够，都尽力返回
     size_t actualNum = 1;
     while (actualNum < batchNum && nextObj(end)) {
+        // cout << "end: " << end << endl;
         end = nextObj(end);
         ++actualNum;
     }
@@ -81,7 +82,6 @@ size_t CentralCache::FetchRangeObj(void *&start, void *&end, size_t batchNum,
     span->_freelist = nextObj(end);
     span->_useCount += actualNum;
     nextObj(end) = nullptr;
-
     _spanLists[index]._mutex.unlock();
     // cout << "FetchRangeObj end..." << endl;
     return actualNum;
@@ -108,11 +108,13 @@ void CentralCache::ReleaseRangeObj(void *start, size_t size) {
         if (span->_useCount == 0) {
             // 归还Span
             _spanLists[index].Erase(span);
+            _spanLists[index]._mutex.unlock();
 
             PageCache::GetInstance()->Lock();
             PageCache::GetInstance()->ReleaseSpanToPageCache(span);
             PageCache::GetInstance()->Unlock();
             // spansToRelease.push_back(span);
+            _spanLists[index]._mutex.lock();
         }
 
         start = next;

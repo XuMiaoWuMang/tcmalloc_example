@@ -37,6 +37,7 @@ static void ConcurrentFree(void *ptr) {
     Span *span = PageCache::GetInstance()->MapSpan(ptr);
 
     size_t size = span->_objSize;
+    
     if (size > MAX_THREAD_CACHE_SIZE) {
         // size_t alignsize = SizeClass::RoundUp(size);
 
@@ -49,6 +50,9 @@ static void ConcurrentFree(void *ptr) {
             TLS_pthread_cache = tls_pool.New();
         }
         assert(size <= MAX_THREAD_CACHE_SIZE);
+        assert(size > 0);
+
+
         TLS_pthread_cache->Deallocate(ptr, size);
     }
     // 使用ThreadCache释放内存块

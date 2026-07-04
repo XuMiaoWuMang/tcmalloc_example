@@ -8,11 +8,7 @@
 using std::cout;
 using std::endl;
 
-#if defined(__WIN32) || defined(_WIN64)
-#include <Windows.h>
-#elif defined(__x86_64__) || defined(__i386__)
-#include <stdlib.h>
-#endif
+
 
 template <class T> class ObjectPool {
   public:
@@ -100,49 +96,3 @@ template <class T> class ObjectPool {
     std::mutex _mutex;           // 互斥锁，用于保护内存池的并发访问
     std::vector<void *> _blocks; // 记录所有 SystemAlloc 的页
 };
-struct TreeNode {
-    int _val;
-    TreeNode *_left;
-    TreeNode *_right;
-    TreeNode() : _val(0), _left(nullptr), _right(nullptr) {}
-};
-inline void TestObjectPool() {
-    // 申请释放的轮次
-    const size_t Rounds = 3;
-    // 每轮申请释放多少次
-    const size_t N = 1000000;
-    size_t begin1 = clock();
-    std::vector<TreeNode *> v1;
-    v1.reserve(N);
-    for (size_t j = 0; j < Rounds; ++j) {
-        for (int i = 0; i < N; ++i) {
-            v1.push_back(new TreeNode());
-        }
-        for (int i = 0; i < N; ++i) {
-            delete v1[i];
-        }
-        v1.clear();
-    }
-    size_t end1 = clock();
-    cout << "new cost time:" << end1 - begin1 << endl;
-
-    size_t begin2 = clock();
-    std::vector<TreeNode *> v2;
-    v2.reserve(N);
-    ObjectPool<TreeNode> pool;
-    for (size_t j = 0; j < Rounds; ++j) {
-        // cout << "j: " << j << endl;
-        for (int i = 0; i < N; ++i) {
-            v2.push_back(pool.New());
-        }
-        for (int i = 0; i < N; ++i) {
-            // cout << "i: " << i << endl;
-            pool.Delete(v2[i]);
-        }
-        v2.clear();
-    }
-    size_t end2 = clock();
-    cout << "object pool cost time:" << end2 - begin2 << endl;
-}
-
-// OBJECT_POOL_H

@@ -3,120 +3,7 @@
 #include "comm.h"
 #include <atomic>
 #include <thread>
-#include <unistd.h>
 
-// static int num = 0;
-void Alloc1() {
-    // 申请释放的轮次
-    const size_t Rounds = 30;
-    // 每轮申请释放多少次
-    const size_t N = 1000000;
-    std::vector<TreeNode *> v1;
-    v1.reserve(N);
-    size_t begin1, end1;
-    begin1 = clock();
-    for (size_t j = 0; j < Rounds; ++j) {
-
-        for (int i = 0; i < N; ++i) {
-            v1.push_back((TreeNode *)new TreeNode());
-        }
-
-        for (int i = 0; i < N; ++i) {
-            delete v1[i];
-        }
-
-        v1.clear();
-    }
-    end1 = clock();
-    cout << "New cost time:" << end1 - begin1 << endl;
-}
-void Alloc2() {
-    // 申请释放的轮次
-    const size_t Rounds = 30;
-    // 每轮申请释放多少次
-    const size_t N = 1000000;
-
-    std::vector<TreeNode *> v2;
-    v2.reserve(N);
-    size_t begin2;
-    size_t end2;
-    begin2 = clock();
-    for (size_t j = 0; j < Rounds; ++j) {
-
-        // cout << "j: " << j << endl;
-        for (int i = 0; i < N; ++i) {
-            v2.push_back((TreeNode *)ConcurrentAlloc(sizeof(TreeNode)));
-        }
-
-        // CentralCache::GetInstance()->debugPrint();
-
-        for (int i = 0; i < N; ++i) {
-            // cout << "i: " << i << endl;
-            ConcurrentFree(v2[i]);
-        }
-
-        // CentralCache::GetInstance()->debugPrint();
-        // CentralCache::GetInstance()->debugPrint();
-
-        v2.clear();
-    }
-    end2 = clock();
-    cout << "Concurrent cost time:" << end2 - begin2 << endl;
-}
-void TLStest() {
-    std::thread t1(Alloc1);
-    std::thread t2(Alloc2);
-    t1.join();
-    t2.join();
-}
-void testAlloc() {
-    // 申请释放的轮次
-    const size_t Rounds = 1;
-    // 每轮申请释放多少次
-    const size_t N = 10000000;
-    std::vector<TreeNode *> v1;
-    v1.reserve(N);
-    size_t begin1, end1;
-    begin1 = clock();
-    for (size_t j = 0; j < Rounds; ++j) {
-        for (int i = 0; i < N; ++i) {
-            v1.push_back((TreeNode *)new TreeNode());
-        }
-        for (int i = 0; i < N; ++i) {
-            delete v1[i];
-        }
-        v1.clear();
-    }
-    end1 = clock();
-    cout << "new cost time:" << end1 - begin1 << endl;
-
-    std::vector<TreeNode *> v2;
-    v2.reserve(N);
-    size_t begin2;
-    size_t end2;
-    begin2 = clock();
-    for (size_t j = 0; j < Rounds; ++j) {
-        // cout << "j: " << j << endl;
-        for (int i = 0; i < N; ++i) {
-            v2.push_back((TreeNode *)ConcurrentAlloc(sizeof(TreeNode)));
-        }
-
-        // CentralCache::GetInstance()->debugPrint();
-
-        for (int i = 0; i < N; ++i) {
-            // cout << "i: " << i << endl;
-            ConcurrentFree(v2[i]);
-        }
-
-        // CentralCache::GetInstance()->debugPrint();
-        // CentralCache::GetInstance()->debugPrint();
-
-        v2.clear();
-    }
-    end2 = clock();
-
-    cout << "Concurrent cost time:" << end2 - begin2 << endl;
-}
 void BenchmarkMalloc(size_t ntimes, size_t nworks, size_t rounds) {
     std::vector<std::thread> vthread(nworks);
     std::atomic<size_t> malloc_costtime = 0;
@@ -205,9 +92,9 @@ int Benchmarktest() {
     size_t n = 10000;
     cout << "=========================================================="
          << endl;
-    BenchmarkConcurrentMalloc(n, 10, 10);
+    BenchmarkConcurrentMalloc(n, 5, 3);
     cout << endl << endl;
-    BenchmarkMalloc(n, 10, 10);
+    BenchmarkMalloc(n, 5, 3);
     cout << "=========================================================="
          << endl;
     return 0;
@@ -217,6 +104,15 @@ void test() {
     void *p2 = ConcurrentAlloc(127 * 1024);
     void *p3 = ConcurrentAlloc(256 * 1024);
     void *p4 = ConcurrentAlloc(257 * 4 * 1024);
+    void *p5 = ConcurrentAlloc(257 * 4 * 1024);
+    void *p6 = ConcurrentAlloc(257 * 4 * 1024);
+    void *p7 = ConcurrentAlloc(257 * 4 * 1024);
+    void *p8 = ConcurrentAlloc(257 * 4 * 1024);
+    void *p9 = ConcurrentAlloc(257 * 4 * 1024);
+    void *p10 = ConcurrentAlloc(257 * 4 * 1024);
+    void *p11 = ConcurrentAlloc(257 * 4 * 1024);
+    void *p12 = ConcurrentAlloc(257 * 4 * 1024);
+    void *p13 = ConcurrentAlloc(257 * 4 * 1024);
 
     cout << "p1: " << p1 << endl;
     ConcurrentFree(p1);
@@ -226,15 +122,27 @@ void test() {
     ConcurrentFree(p3);
     cout << "p4: " << p4 << endl;
     ConcurrentFree(p4);
-
-    // PageCache::GetInstance()->debugPrint();
+    cout << "p5: " << p5 << endl;
+    ConcurrentFree(p5);
+    cout << "p6: " << p6 << endl;
+    ConcurrentFree(p6);
+    cout << "p7: " << p7 << endl;
+    ConcurrentFree(p7);
+    cout << "p8: " << p8 << endl;
+    ConcurrentFree(p8);
+    cout << "p9: " << p9 << endl;
+    ConcurrentFree(p9);
+    cout << "p10: " << p10 << endl;
+    ConcurrentFree(p10);
+    cout << "p11: " << p11 << endl;
+    ConcurrentFree(p11);
+    cout << "p12: " << p12 << endl;
+    ConcurrentFree(p12);
+    cout << "p13: " << p13 << endl;
+    ConcurrentFree(p13);
 }
-
-int main() {
-    // TLStest();
-    // testAlloc();
-    // TestObjectPool();
+int main()
+{
     // test();
     Benchmarktest();
-    return 0;
 }

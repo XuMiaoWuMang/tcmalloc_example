@@ -16,6 +16,7 @@
 
 # Debugger Files
 *.pdb
+.gdb_history
 
 # Compiled Dynamic libraries
 *.so

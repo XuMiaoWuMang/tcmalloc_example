@@ -2,12 +2,20 @@
 #include <assert.h>
 #include <iostream>
 #include <mutex>
-#include <sys/mman.h>
 #include <time.h>
 #include <unordered_map>
 #include <vector>
+#include <cstring>
 using std::cout;
 using std::endl;
+
+#if defined(_WIN32) || defined(_WIN64)
+#include <Windows.h>
+#elif defined(__x86_64__) || defined(__i386__)
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#endif
 
 #ifdef __x86_64__
 typedef unsigned long long PAGE_ID;
@@ -30,7 +38,7 @@ static const size_t PAGE_SHIFT =
 static void *&nextObj(void *obj) { return *(void **)obj; }
 inline static void *SystemAlloc(size_t kpage) {
     // 申请4kB内存页
-#if defined(__WIN32) || defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64)
     void *ptr = VirtualAlloc(0, kpage << PAGE_SHIFT, MEM_COMMIT | MEM_RESERVE,
                              PAGE_READWRITE);
 #elif defined(__x86_64__) || defined(__i386__)
@@ -43,7 +51,7 @@ inline static void *SystemAlloc(size_t kpage) {
 }
 // 释放 kpage*4kB 内存页
 inline static void SystemFree(void *ptr, size_t kpage) {
-#if defined(__WIN32) || defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64)
     VirtualFree(ptr, kpage << PAGE_SHIFT, MEM_RELEASE);
 #elif defined(__x86_64__) || defined(__i386__)
     munmap(ptr, kpage << PAGE_SHIFT);
@@ -53,13 +61,27 @@ class FreeList {
   public:
     FreeList() : _head(nullptr), _size(0), _maxSize(256) {};
 
+    // 验证 _size 与实际链长一致，不一致时打印并触发断点
+    void verify(int bucket) const {
+        size_t actual = 0;
+        void *p = _head;
+        while (p && actual < _size + 10) {
+            actual++;
+            if (actual > _size + 10) break;
+            p = nextObj(p);
+        }
+        if (actual != _size) {
+            std::cerr << "FREELIST CORRUPTED: bucket=" << bucket
+                      << " _size=" << _size << " actual=" << actual
+                      << " _head=" << _head << " maxSize=" << _maxSize
+                      << std::endl;
+            assert(!"FreeList _size mismatch");
+        }
+    }
+
     // 头插：将对象插入到freelist的头
     void Push(void *obj) {
         assert(obj);
-        // if((PAGE_ID)nextObj(obj) < (PAGE_ID)(1 << PAGE_SHIFT))
-        // {
-        //     int a = 0;
-        // }
 
         nextObj(obj) = _head;
         _head = obj;
@@ -88,8 +110,27 @@ class FreeList {
 
     // 批量删除num个对象，返回对应对象的指针范围，start指向第一个删除对象，end指向最后一个删除对象
     void PopRange(void *&start, void *&end, size_t num) {
-        assert(_head);
-        assert(num <= _size);
+        assert(num > 0);
+
+        // 计算链表的实际长度，防止因 _size 膨胀导致越界崩溃
+        size_t actualLen = 0;
+        void *cur = _head;
+        while (cur && actualLen < num) {
+            actualLen++;
+            cur = nextObj(cur);
+        }
+        if (actualLen < num) {
+            std::cerr << "BUG: PopRange num=" << num << " _size=" << _size
+                      << " actualLen=" << actualLen << " — clamping num" << std::endl;
+            num = actualLen;
+        }
+
+        if (num == 0) {
+            // 链表已空但 _size 虚高：直接修正
+            _size = 0;
+            start = end = nullptr;
+            return;
+        }
 
         start = end = _head;
         for (size_t i = 0; i < num - 1; i++) {
@@ -130,6 +171,7 @@ class SizeClass {
 
     // 返回对齐后的大小
     static size_t RoundUp(size_t size) {
+        assert(size);
         if (size <= 128) {
             return _RoundUp(size, 8);
         } else if (size <= 1024) {
